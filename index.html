@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+
+<!--
+Copyright (C) 2018 Mikhail Pak
+CC-BY-NC-SA 4.0
+
+This slide deck uses reveal.js by Hakim El Hattab.
+Copyright (C) 2018 Hakim El Hattab, http://hakim.se
+MIT License
+-->
+
+<head>
+	<meta charset="utf-8">
+
+	<title>A distributed algorithm for computing rational Krylov subspaces</title>
+
+	<meta name="description" content="A distributed algorithm for computing rational Krylov subspaces">
+	<meta name="author" content="Mikhail Pak, Technical University of Munich">
+
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0/css/reveal.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0/css/theme/solarized.min.css" id="theme">
+</head>
+
+
+<body>
+<div class="reveal">
+<div class="slides">
+
+<section class="center">
+	<h2 style="font-size: 200%">A distributed algorithm for computing rational Krylov subspaces</h2>
+	<p style="font-size: 75%">Mikhail Pak, Technical University of Munich</p>
+	<p style="font-size: 75%">SIAM ALA 2018, 7 May 2018</p>
+</section>
+
+<section>
+	<h3>Outline</h3>
+	<ul>
+		<li><p><a style="color: #657b83" href="#/2">Introduction and motivation</a></p></li>
+		<li><p><a style="color: #657b83" href="#/8">Related work</a></p></li>
+		<li><p><a style="color: #657b83" href="#/13">Proposed algorithm</a></p></li>
+		<li><p><a style="color: #657b83" href="#/19">Convergence analysis and proof sketch</a></p></li>
+		<li><p><a style="color: #657b83" href="#/24">Open questions and outlook</a></p></li>
+	</ul>
+</section>
+
+<section>
+	<h3>Introduction</h3>
+	<div style="text-align: left;">
+		<p>Rational Krylov subspace (simplified):</p>
+		<br>
+		<p>
+			$$
+				\mathcal{R}_{\ell}(A, b)
+				=
+				\mathrm{span}\!\left\{ b, \ A^{-1} b, \ A^{-2} b, \ \ldots,\ A^{-\ell + 1} b \right\}
+			$$
+		</p>
+		<br>
+		<p>with invertible $A \in \mathbb{R}^{n \times n}$, $b \in \mathbb{R}^{n}$, $\ell \ll n$</p>
+		<p class="fragment">
+			Useful for solving large eigenproblems or for
+			<em>model order reduction of large dynamical systems</em>
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Introduction</h3>
+	<div style="text-align: left;">
+		<p>
+			Can be computed with the <em>rational Arnoldi</em> algorithm:
+		</p>
+		<ul>
+			<li><p>$x^{[0]} \leftarrow b$</p></li>
+			<li><p>for $p = 1, \ldots, \ell - 1$, compute $x^{[p]} \leftarrow A^{-1} x^{[p - 1]}$</p></li>
+			<li><p>return $\mathrm{span} \{ x^{[0]}, \ldots, x^{[\ell - 1]} \}$</p></li>
+		</ul>
+		<p class="fragment">
+			... that sounds almost too easy!
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Introduction</h3>
+	<div style="text-align: left;">
+		<p>We need some special sauce:</p>
+		<ul>
+			<li class="fragment"><p>do some work upfront to make computation of subsequent directions $x^{[p]}$ cheaper</p></li>
+			<li class="fragment"><p>reorthonormalize each direction $x^{[p]}$ immediately after computation</p></li>
+		</ul>
+	</div>
+</section>
+
+<section>
+	<h3>Introduction</h3>
+	<p style="text-align: left;">Without doing work upfront:</p><br>
+	<object style="height: auto; width: auto;" data="img/arnoldi.svg"></object>
+</section>
+
+<section>
+	<h3>Introduction</h3>
+	<p style="text-align: left;">With doing work upfront:</p><br>
+	<object style="height: auto; width: auto;" data="img/better_arnoldi.svg"></object>
+</section>
+
+<section>
+	<h3>Motivation</h3>
+	<div style="text-align: left;">
+		<p>Recent trends:</p>
+		<ul>
+			<li><p>larger problems, more data</p></li>
+			<li class="fragment"><p>memory-bound instead of compute-bound</p></li>
+			<li class="fragment"><p>distributed data</p></li>
+		</ul>
+		<p class="fragment">
+			As a result, development of <em>memory access</em>-conscious algorithms,
+			e.g. randomized SVD (Halko et al., 2011)
+		</p>
+		<p class="fragment">
+			Can we compute a rational Krylov subspace <em>distributedly</em>?
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Related work</h3>
+	<div style="text-align: left;">
+		<p>Mou et al. 2015: “A distributed algorithm for solving a linear algebraic equation”</p>
+		<span class="fragment">
+			<p>
+				Solves $A x = b$ distributedly by a time-variant network of $m$
+				agents with <em class="fragment highlight-blue">limited knowledge</em>,
+				i.e. each agent has access only to a subset of rows:
+			</p>
+			<p>$$A_{i} \in \mathbb{R}^{n_i \times n}, \ A = \mathrm{vertcat}(A_1, \ldots, A_m)$$</p>
+			<p>$$b_{i} \in \mathbb{R}^{n_i}, \ b = \mathrm{vertcat}(b_1, \ldots, b_m)$$</p>
+			<p>$$n = \textstyle\sum_{i = 1}^{m} n_i$$</p>
+		</span>
+	</div>
+</section>
+
+<section>
+	<h3>Related work</h3>
+	<p style="text-align: left;">The problem is <em>distributed</em> onto agents:</p><br>
+	<object style="height: auto;" data="img/slices.svg"></object>
+</section>
+
+<section>
+	<h3>Related work</h3>
+	<div style="text-align: left;">
+		<p>Update rule for the estimate $x_i(t)$ of the $i$-th agent:</p>
+		<p>
+			$$
+				x_{i}(t + 1)
+				=
+				z_{i}(t)
+				-
+				P_{i} \left( z_{i}(t) - \frac{1}{m_{i}(t)} \sum_{j \in \mathcal{N}_{i}(t)} x_{j}(t) \right)
+			$$
+		</p>
+		<br>
+		<p>
+			Here, $z_{i}(t) \in \mathbb{R}^{n}$ satisfies <span class="fragment highlight-blue">$A_{i} z_{i}(t) = b_{i}$</span>,
+			$P_{i} \in \mathbb{R}^{n \times n}$ is an orthogonal projector onto the kernel of $A_{i}$,
+			$\mathcal{N}_{i}(t)$ are neighbors of $i$-th agents, and
+			$m_{i}(t) = | \mathcal{N}_{i}(t) |$
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Related work</h3>
+	<div style="text-align: left;">
+		<p>Mou et al.'s main result:</p>
+		<p><em>
+			If $A$ is invertible and the network is repeatedly jointly strongly connected,
+			then there exists $0 < \lambda < 1$ for which all $x_{i}(t)$ converge
+			to the solution to $A x = b$ as fast as <span class="fragment highlight-blue">$\lambda^{t}$</span> converges to $0$
+		</em></p>
+		<p class="fragment">
+			Linear convergence under some mild assumptions on network connectivity
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Related work</h3>
+	<div style="text-align: left;">
+		<p>Some remarks:</p>
+		<ul>
+			<li><p>no assumptions on matrix sparsity or structure</p></li>
+			<li><p>each agent requires $\Theta(n \cdot m_{i}(t))$ communication at each time step</p></li>
+			<li><p>the most expensive operation is the projection $P_{i}$</p></li>
+			<li><p class="fragment" style="color: #dc322f;">convergence is quite slow in practice ($\lambda \approx 1$)</p></li>
+		</ul>
+	</div>
+	<p class="fragment" style="color: #dc322f;">(ノ﹏ヽ)</p>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<div style="text-align: left;">
+		<p>Problem statement:</p>
+		<p><em>
+			Compute $\mathcal{R}_{\ell}(A, b)$ distributedly by agents with limited knowledge
+			as quickly as possible
+		</em></p>
+		<br>
+		<p class="fragment">
+			Naïve solution:
+			Use Mou et al.'s algorithm as the linear equation solver within the rational Arnoldi process
+		</p>
+		<p class="fragment">
+			Problem:
+			No possibility for speed-up by doing work upfront
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<p style="text-align: left;">Cannot do work upfront:</p><br>
+	<object style="height: auto; width: auto;" data="img/sdale.svg"></object>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<div style="text-align: left;">
+		<p>
+			Idea:
+			Use the <em>current, agent-specific estimate</em>
+			for $x^{[p]} = A^{-1} x^{[p - 1]}$ as the right hand side
+			for the subsequent rational Krylov direction
+		</p>
+		<p class="fragment">
+			In other words, <em>compute $(p + 1)$-th direction
+			while converging to the $p$-th direction</em>
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<p style="text-align: left;">Iterate all directions at the same time:</p><br>
+	<object style="height: auto; width: auto;" data="img/dark.svg"></object>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<div style="text-align: left;">
+		<p>Update rule rule for the $i$-th agent:</p>
+		<p>
+			$$
+			x_{i}^{[p]}(t + 1)
+			=
+			z_{i}^{[p]}(t)
+			-
+			P_{i} \left(
+				z_{i}^{[p]}(t)
+				-
+				\frac{1}{m_{i}(t)}
+				\sum_{j \in \mathcal{N}_{i}(t)}
+				x_{j}^{[p]}(t)
+			\right)
+			$$
+		</p>
+		<br>
+		<p>
+			Here, $p = 1, 2, \ldots, \ell - 1$, $x_{i}^{[0]}(t) \equiv b \ \forall i$,
+			and $z_{i}^{[p]}(t) \in \mathbb{R}^{n}$
+			satisfies <span class="fragment highlight-blue">$A_{i} z_{i}^{[p]}(t) = S_{i} x_{i}^{[p - 1]}(t)$</span>
+		</p>
+		<p>
+			($S_{i} \in \mathbb{R}^{n_i \times n}$
+			is a “selector” matrix s.t. $b_{i} = S_{i} b$)
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Proposed algorithm</h3>
+	<div style="text-align: left;">
+		<p>Main result:</p>
+		<p><em>
+			If $A$ is invertible and the network is repeatedly jointly strongly connected,
+			then there exists $0 < \lambda < 1$ for which all $x_{i}^{[p]}(t)$ converge
+			to the solution to $A^{p} x = b$ as fast as
+			<span class="fragment highlight-blue">$t^{p - 1} \lambda^{t}$</span> converges to $0$
+			for all $p = 1, \ldots, \ell - 1$
+		</em></p>
+	</div>
+</section>
+
+<section>
+	<h3>Convergence analysis and proof sketch</h3>
+	<div style="text-align: left;">
+		<p>Joint error dynamics of the Mou et al.'s algorithm:</p>
+		<p>$$e(t + 1) = \mathcal{A}(t) \, e(t)$$</p>
+		<br>
+		<span class="fragment">
+			<p>Joint error dynamics of the proposed algorithm:</p>
+			<p>
+				$$
+					e^{[p]}(t + 1)
+					=
+					\mathcal{A}(t) \, e^{[p]}(t)
+					+
+					\delta^{[p - 1]}(t)
+					+
+					D^{[p]}(t)
+				$$
+			</p>
+			<p>with $p = 1, 2, \ldots, \ell - 1$</p>
+		</span>
+	</div>
+</section>
+
+<section>
+	<h3>Convergence analysis and proof sketch</h3>
+	<div style="text-align: left;">
+		<p>
+			$$
+				e^{[p]}(t + 1)
+				=
+				\mathcal{A}(t) \, e^{[p]}(t)
+				+
+				\delta^{[p - 1]}(t)
+				+
+				D^{[p]}(t)
+			$$
+		</p>
+		<br>
+		<p class="fragment">
+			$\delta^{[p - 1]}(t)$ is the disturbance term due to the fact that each agent's
+			estimate for $x^{[p - 1]}$ changes in time
+		</p>
+		<p class="fragment">
+			$D^{[p]}(t)$ is the disturbance term due to the fact that each agent uses its own
+			estimate for $x^{[p - 1]}$
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Convergence analysis and proof sketch</h3>
+	<div style="text-align: left;">
+		<p>Informal statement of Lemma 1:</p>
+		<p><em>
+			Consider an exponentially stable system which zero-input response
+			decays as $\lambda^t$, $0 < \lambda < 1$.
+			If this system is disturbed with an input signal which
+			decays as $t^{\kappa} \lambda^t$,
+			then its zero-state response will decay as $t^{\kappa + 1} \lambda^t$,
+			$\kappa = 0, 1, 2, \ldots$
+		</em></p>
+	</div>
+</section>
+
+<section>
+	<h3>Convergence analysis and proof sketch</h3>
+	<div style="text-align: left;">
+		<p>Proof sketch (using mathematical induction)</p>
+		<p class="fragment">Base case ($p = 1$): Reduced to Mou et al.</p>
+		<p class="fragment">
+			Inductive hypothesis ($p > 1$): Assume that $x_{i}^{[p - 1]}(t)$ converge
+			to the solution to $A^{p - 1} x = b$ as fast as $t^{p - 2} \lambda^{t}$ converges to $0$
+		</p>
+	</div>
+</section>
+
+<section>
+	<h3>Convergence analysis and proof sketch</h3>
+	<div style="text-align: left;">
+		<p>Inductive step:</p>
+		<ul>
+			<li class="fragment"><p>
+				show that $D^{[p]}(t)$ and $\delta^{[p - 1]}(t)$ converge to $0$
+				as fast as $t^{p - 2} \lambda^{t}$ converges to $0$
+			</p></li>
+			<li class="fragment"><p>
+				apply Lemma 1
+			</p></li>
+			<li class="fragment"><p>
+				$e^{[p]}(t)$ consists of the zero-input response (bounded by $\lambda^{t}$)
+				and the zero-state response (bounded by
+				<span class="fragment highlight-blue">$t^{p - 1} \lambda^{t}$</span>)
+			</p></li>
+		</ul>
+	</div>
+</section>
+
+<section>
+	<h3>Open questions and outlook</h3>
+	<div style="text-align: left;">
+		<p>Summary of this contribution:</p>
+		<p class="fragment"><em>
+			Propose a distributed algorithm for computing
+			a rational Krylov subspace faster at the price
+			of more communication at each time step: $\Theta(n \cdot \ell \cdot m_{i}(t))$
+		</em>
+		<p class="fragment"><em>
+			Provide a bound for the convergence: $t^{p - 1} \lambda^t$
+		</em>
+		<p class="fragment"><em>
+			Error dynamics similar to the underlying solver,
+			hence benefits from any improvements to the Mou et al.'s algorithm
+		</em>
+	</div>
+</section>
+
+<section>
+	<h3>Open questions and outlook</h3>
+	<div style="text-align: left;">
+		<p>
+			There are some serious open issues that have to be solved
+			before applying this method in practice:
+		</p>
+		<ul>
+			<li class="fragment"><p>
+				how can we implement reorthonormalization without jeopardizing convergence?
+			</p></li>
+			<li class="fragment" style="color: #dc322f;"><p>
+				how can we improve the convergence rate $\lambda$?
+			</p></li>
+			<li class="fragment" style="color: #dc322f;"><p>
+				how can we (further) reduce the required amount of communication?
+			</p></li>
+		</ul>
+	</div>
+</section>
+
+<section>
+	<h3>Open questions and outlook</h3>
+	<p style="text-align: left;">
+		Numerical results ($n = 1357$, $m = 23$, $\ell = 6$):
+	</p>
+	<object style="height: auto; width: auto;" data="img/plot.svg"></object>
+</section>
+
+<section class="center">
+	<h3>Thank you</h3>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0/lib/js/head.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0/js/reveal.min.js"></script>
+
+<script>
+	Reveal.initialize({
+		controls: false,
+		progress: true,
+		history: true,
+		center: false,
+
+		transition: 'fade',
+
+		math: {
+			mathjax: 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js',
+			config: 'TeX-AMS_HTML-full',
+		},
+
+		dependencies: [
+			{ src: 'https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0/plugin/math/math.min.js', async: true },
+		],
+	});
+	Reveal.configure({
+		slideNumber: true,
+		slideNumber: 'c',
+	});
+</script>
+</body>
+</html>
